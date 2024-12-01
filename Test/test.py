@@ -1,7 +1,29 @@
 import taichi as ti
 
+
+# * set device
 ti.init(arch=ti.gpu)
 
+
+# * object settings
+vec3 = ti.types.vector(3, float)
+
+
+@ti.dataclass
+class Ball:
+    center: vec3
+    radius: float
+    color: vec3
+
+
+balls_field = ti.Struct.field({
+    "center": vec3,
+    "radius": float,
+    "color": vec3
+}, shape=(1,))
+
+
+# * basic canvas settings
 # set window
 window = ti.ui.Window("Test", (800, 800))
 
@@ -30,9 +52,9 @@ while window.running:
     scene.ambient_light((0.5, 0.5, 0.5))
 
     # set particles
-    ball_center = ti.Vector.field(3, dtype=ti.f32, shape=(1,))
-    ball_center[0] = [0, 0, 0]
-    scene.particles(centers=ball_center, radius=0.5)
+    ball = Ball(center=[0, 0, 0], radius=0.5, color=(1, 0, 0))
+    balls_field[0] = ball
+    scene.particles(balls_field.center, ball.radius, ball.color)
     canvas.scene(scene)
 
     window.show()
