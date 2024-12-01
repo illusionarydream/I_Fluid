@@ -49,28 +49,31 @@ class NeighborSearcher:
         neighbor_num = 0
 
         # for each grid cell
-        for i in range(27):
+        for t in range(1):  # ! need to be refined
+            for i in range(27):
 
-            # get neighbor grid cell
-            offset = ti.Vector([i // 9 - 1, (i // 3) % 3 - 1, i % 3 - 1])
-            neighbor_grid_idx = grid_idx + offset
-            if (neighbor_grid_idx < 0).any() or (neighbor_grid_idx >= self.grid_resolution).any():
-                continue
+                # get neighbor grid cell
+                offset = ti.Vector([i // 9 - 1, (i // 3) % 3 - 1, i % 3 - 1])
+                neighbor_grid_idx = grid_idx + offset
+                if (neighbor_grid_idx < 0).any() or (neighbor_grid_idx >= self.grid_resolution).any():
+                    continue
 
-            # get neighbor particles
-            neighbor_hash_idx = self.hash_mapping(neighbor_grid_idx)
-            for j in range(self.hash_table[neighbor_hash_idx].length()):
-                particle_idx = self.hash_table[neighbor_hash_idx, j]
-                if (self.position[particle_idx] - position).norm() < self.radius:
-                    # remove those overlapping particles
-                    already_added = False
-                    for k in range(neighbor_num):
-                        if neighbors[k] == particle_idx:
-                            already_added = True
-                            break
-                    if not already_added:
-                        neighbors[neighbor_num] = particle_idx
-                        neighbor_num += 1
+                # get neighbor particles
+                neighbor_hash_idx = self.hash_mapping(neighbor_grid_idx)
+                for j in range(self.hash_table[neighbor_hash_idx].length()):
+                    particle_idx = self.hash_table[neighbor_hash_idx, j]
+
+                    # check the distance
+                    if (self.position[particle_idx] - position).norm() < self.radius:
+                        # remove those overlapping particles
+                        already_added = False
+                        for k in range(neighbor_num):
+                            if neighbors[k] == particle_idx:
+                                already_added = True
+                                break
+                        if not already_added:
+                            neighbors[neighbor_num] = particle_idx
+                            neighbor_num += 1
 
         return neighbor_num
 
