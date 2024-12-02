@@ -19,16 +19,41 @@ particle_system.random_initialize()
 neighbor_searcher = ns.NeighborSearcher(particle_system)
 
 # new particle system
-new_particle_num = 500
+new_particle_num = 100
 new_particle_system = pa.ParticleSystem(new_particle_num)
 new_particle_system.random_initialize()
 
 # SPH interpolation
-neighbor_searcher.SPH_interpolation(new_particle_system.position,
-                                    particle_system.position,
-                                    new_particle_system.color,
-                                    new_particle_system.max_particles)
 
+
+@ ti.kernel
+def old_property_init(position: ti.template(), old_property: ti.template()):
+    for i in range(particle_system.max_particles):
+        old_property[i] = 0.5
+
+
+@ ti.kernel
+def new_property_init(color: ti.template(), new_property: ti.template()):
+    for i in range(new_particle_system.max_particles):
+        val = new_property[i]
+        color[i] = [val, val, val]
+
+
+old_property = ti.field(float, particle_system.max_particles)
+old_property_init(particle_system.position, old_property)
+new_property = ti.field(float, new_particle_system.max_particles)
+neighbor_searcher.SPH_interpolation(new_particle_system.position,
+                                    old_property,
+                                    new_property,
+                                    new_particle_system.max_particles,
+                                    types="laplacian")
+new_property_init(new_particle_system.color, new_property)
+
+# print("new_particle_system.mass:", new_particle_system.mass.to_numpy())
+# print("new_particle_system.color:", new_particle_system.color.to_numpy())
+# print("new_particle_system.position:", new_particle_system.position.to_numpy())
+# print("color - position:", new_particle_system.color.to_numpy() -
+#   new_particle_system.position.to_numpy())
 
 # * basic canvas settings
 # set window

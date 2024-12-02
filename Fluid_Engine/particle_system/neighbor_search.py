@@ -31,7 +31,9 @@ class NeighborSearcher:
 
         # * SPH interpolation attributes
         self.kernel_radius = self.radius
+        self.kernel_type = 0  # 0: Poly6, 1: Muller
         self.Muller_kernel_factor = 15 / (3.14159 * self.kernel_radius**3)
+        self.Poly6_kernel_factor = 315 / (64 * 3.14159 * self.kernel_radius**9)
         self.density = ti.field(ti.f32, shape=self.max_particles)
 
     # * Grid Hashing
@@ -104,50 +106,180 @@ class NeighborSearcher:
     # * SPH Interpolation
     @ ti.func
     def SPH_kernel(self, r: ti.f32) -> ti.f32:
+
+        # use Poly6 kernel
+        # return self.Poly6_kernel_factor * (self.radius**2 - r**2)**3
         # use Muller kernel
         h = self.radius
         q = r / h
         return self.Muller_kernel_factor * (1 - q)**3
 
+    @ ti.func
+    def SPH_kernel_gradient(self, r: ti.f32) -> ti.f32:
+
+        # use Poly6 kernel
+        # return -6 * self.Poly6_kernel_factor * (self.radius**2 - r**2)**2
+        # use Muller kernel
+        h = self.radius
+        q = r / h
+        return -3 * self.Muller_kernel_factor * (1 - q)**2 / h
+
+    @ ti.func
+    def SPH_kernel_laplacian(self, r: ti.f32) -> ti.f32:
+
+        # use Poly6 kernel
+        # return 30 * self.Poly6_kernel_factor * (self.radius**2 - r**2)
+        # use Muller kernel
+        h = self.radius
+        q = r / h
+        return 6 * self.Muller_kernel_factor * (1 - q) / h**2
+
+    # * Basic Numerical
     @ ti.kernel
-    def interpolation_density(self, neighbors: ti.template(), neighbors_num: ti.template()):
-        for i in range(self.max_particles):
-            density = 0.0
+    def interpolation_density(self, position: ti.template(), neighbors: ti.template(), neighbors_num: ti.template(), density: ti.template(), max_particles: ti.i32):
+        for i in range(max_particles):
+            density_sum = 0.0
             for j in range(neighbors_num[i]):
                 neighbor_idx = neighbors[i, j]
-                r = (self.position[i] - self.position[neighbor_idx]).norm()
+                r = (position[i] - self.position[neighbor_idx]).norm()
                 if r < self.radius:
-                    density += self.mass[neighbor_idx] * self.SPH_kernel(r)
+                    density_sum += self.mass[neighbor_idx] * self.SPH_kernel(r)
 
-            self.density[i] = density
+            density[i] = density_sum
 
     @ ti.kernel
-    def interpolation_property(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+    def interpolation_property_vector(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
 
         # new position, old property, output property
         for i in range(new_particle_num):
+            # get vector dimension
             property_sum = ti.Vector([0.0, 0.0, 0.0])
+
             for j in range(neighbors_num[i]):
                 neighbor_idx = neighbors[i, j]
                 r = (position[i] - self.position[neighbor_idx]).norm()
                 if r < self.radius:
                     # avoid division by zero
                     density_val = max(self.density[neighbor_idx], 1e-8)
-                    property_sum += (old_property[neighbor_idx] *
+                    property_sum += (old_property[neighbor_idx] * self.mass[neighbor_idx] *
                                      self.SPH_kernel(r) / density_val)
-
-                    # ? debug
-                    # if i == 0:
-                    #     print("old_property[", neighbor_idx, "]:",
-                    #           old_property[neighbor_idx])
-                    #     print("self.SPH_kernel(", r, "):",
-                    #           self.SPH_kernel(r))
-                    #     print("density_val:", density_val)
-                    #     print("property_sum:", property_sum)
 
             output[i] = property_sum
 
-    def SPH_interpolation(self, position: ti.template(), old_property: ti.template(), output: ti.template(), new_particle_num: int):
+    @ ti.kernel
+    def interpolation_property_scalar(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+
+        # new position, old property, output property
+        for i in range(new_particle_num):
+            # get vector dimension
+            property_sum = 0.0
+
+            for j in range(neighbors_num[i]):
+                neighbor_idx = neighbors[i, j]
+                r = (position[i] - self.position[neighbor_idx]).norm()
+                if r < self.radius:
+                    # avoid division by zero
+                    density_val = max(self.density[neighbor_idx], 1e-8)
+                    property_sum += (old_property[neighbor_idx] * self.mass[neighbor_idx] *
+                                     self.SPH_kernel(r) / density_val)
+
+            output[i] = property_sum
+
+    # * Gradient
+    @ ti.kernel
+    def interpolation_property_gradient(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+        for i in range(new_particle_num):
+
+            property_sum = ti.Vector([0.0, 0.0, 0.0])
+
+            for j in range(neighbors_num[i]):
+                neighbor_idx = neighbors[i, j]
+
+                R = position[i] - self.position[neighbor_idx]
+                r = R.norm()
+                R /= r
+
+                if r < self.radius:
+                    # avoid division by zero
+                    density_val = max(self.density[neighbor_idx], 1e-8)
+                    property_sum += (old_property[neighbor_idx] * self.mass[neighbor_idx] *
+                                     self.SPH_kernel_gradient(r) * R / density_val)
+
+            # output[i] = (property_sum/property_sum.norm())
+            output[i] = property_sum
+
+    @ ti.kernel
+    def interpolation_property_async(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), new_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+        for i in range(new_particle_num):
+
+            property_sum = ti.Vector([0.0, 0.0, 0.0])
+
+            for j in range(neighbors_num[i]):
+                neighbor_idx = neighbors[i, j]
+
+                R = position[i] - self.position[neighbor_idx]
+                r = R.norm()
+                R /= r
+
+                if r < self.radius:
+                    # avoid division by zero
+                    density_val = max(self.density[neighbor_idx], 1e-8)
+                    property_sum += ((old_property[neighbor_idx] - new_property[i]) * self.mass[neighbor_idx] *
+                                     self.SPH_kernel_gradient(r) * R / density_val)
+
+            # output[i] = (property_sum/property_sum.norm())
+            output[i] = property_sum
+
+    @ti.kernel
+    def interpolation_property_sync(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), new_property: ti.template(), position: ti.template(), density: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+        for i in range(new_particle_num):
+
+            property_sum = ti.Vector([0.0, 0.0, 0.0])
+
+            for j in range(neighbors_num[i]):
+                neighbor_idx = neighbors[i, j]
+
+                R = position[i] - self.position[neighbor_idx]
+                r = R.norm()
+                R /= r
+
+                if r < self.radius:
+                    # avoid division by zero
+                    old_density_val = max(self.density[neighbor_idx], 1e-8)
+                    new_density_val = max(density[i], 1e-8)
+                    old_val = old_property[neighbor_idx] / \
+                        (old_density_val ** 2)
+                    new_val = new_property[i] / \
+                        (new_density_val ** 2)
+                    property_sum += ((old_val + new_val) * self.mass[neighbor_idx] * self.SPH_kernel_gradient(
+                        r) * R * new_density_val)
+
+            # output[i] = (property_sum/property_sum.norm())
+            output[i] = property_sum
+
+    # * Laplacian
+    @ ti.kernel
+    def interpolation_property_laplacian(self, neighbors: ti.template(), neighbors_num: ti.template(), old_property: ti.template(), new_property: ti.template(), position: ti.template(), output: ti.template(), new_particle_num: ti.i32):
+        for i in range(new_particle_num):
+
+            property_sum = 0.0
+
+            for j in range(neighbors_num[i]):
+                neighbor_idx = neighbors[i, j]
+
+                R = position[i] - self.position[neighbor_idx]
+                r = R.norm()
+
+                if r < self.radius:
+                    # avoid division by zero
+                    density_val = max(self.density[neighbor_idx], 1e-8)
+                    property_sum += ((old_property[neighbor_idx] - new_property[i]) * self.mass[neighbor_idx] *
+                                     self.SPH_kernel_laplacian(r) / density_val)
+
+            output[i] = property_sum
+            # output[i] = property_sum
+
+    def SPH_initialization(self):
         # build hash table
         self.build()
 
@@ -159,7 +291,15 @@ class NeighborSearcher:
                                 neighbors_num, self.max_particles)
 
         # SPH interpolation: old density field
-        self.interpolation_density(neighbors, neighbors_num)
+        self.interpolation_density(
+            self.position, neighbors, neighbors_num, self.density, self.max_particles)
+
+    # * MAIN FUNCTION: SPH interpolation
+    # * scalar: interpolation, gradient, laplacian
+    # * vector: interpolation
+    def SPH_interpolation(self, position: ti.template(), old_property: ti.template(), output: ti.template(), new_particle_num: int, types: str = "scalar"):
+        # initialize SPH
+        self.SPH_initialization()
 
         # find new particle neighbors
         neighbors = ti.field(ti.i32, shape=(
@@ -168,12 +308,42 @@ class NeighborSearcher:
         self.find_all_neighbors(position, neighbors,
                                 neighbors_num, new_particle_num)
 
-        # ? debug
-        # print("neighbors_num:", neighbors_num.to_numpy())
-
         # SPH interpolation
-        self.interpolation_property(
-            neighbors, neighbors_num, old_property, position, output, new_particle_num)
+        if types == "scalar":  # ! SPH interpolation with scalar
+            self.interpolation_property_scalar(
+                neighbors, neighbors_num, old_property, position, output, new_particle_num)
+        elif types == "vector":  # ! SPH interpolation with vector
+            self.interpolation_property_vector(
+                neighbors, neighbors_num, old_property, position, output, new_particle_num)
+        elif types == "gradient":  # ! SPH interpolation with gradient
+            self.interpolation_property_gradient(
+                neighbors, neighbors_num, old_property, position, output, new_particle_num)
+        elif types == "async":  # ! async SPH interpolation with gradient, which has better convergence
+            new_property = ti.field(ti.f32, shape=new_particle_num)
+            self.interpolation_property_scalar(
+                neighbors, neighbors_num, old_property, position, new_property, new_particle_num)
+            self.interpolation_property_async(
+                neighbors, neighbors_num, old_property, new_property, position, output, new_particle_num)
+        elif types == "sync":  # ! sync SPH interpolation with gradient, which has better convergence
+            new_property = ti.Vector.field(3, ti.f32, shape=new_particle_num)
+            new_density = ti.field(ti.f32, shape=new_particle_num)
+            # SPH interpolation: new density field
+            self.interpolation_density(
+                position, neighbors, neighbors_num, new_density, new_particle_num)
+            # SPH interpolation: new property field
+            self.interpolation_property_scalar(
+                neighbors, neighbors_num, old_property, position, new_property, new_particle_num)
+            # SPH interpolation: new gradient field
+            self.interpolation_property_sync(
+                neighbors, neighbors_num, old_property, new_property, position, new_density, output, new_particle_num)
+        elif types == "laplacian":  # ! SPH interpolation with laplacian
+            new_property = ti.field(ti.f32, shape=new_particle_num)
+            self.interpolation_property_scalar(
+                neighbors, neighbors_num, old_property, position, new_property, new_particle_num)
+            self.interpolation_property_laplacian(
+                neighbors, neighbors_num, old_property, new_property, position, output, new_particle_num)
+        else:
+            print("Invalid types!")
 
     @ ti.kernel
     def print_hash_table(self):
