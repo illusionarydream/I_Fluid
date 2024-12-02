@@ -11,24 +11,24 @@ ti.init(arch=ti.gpu)
 vec3 = ti.types.vector(3, float)
 
 # particle system
-max_particles = 10000
+max_particles = 100000
 particle_system = pa.ParticleSystem(max_particles)
 particle_system.random_initialize()
 
 # build neighbor searcher
-origin_idx = 0
 neighbor_searcher = ns.NeighborSearcher(particle_system)
-neighbor_searcher.build()
-neighbors = ti.field(ti.i32, 100)
-neighbor_num = neighbor_searcher.find_neighbors(
-    particle_system.position[origin_idx],
-    neighbors)
 
-# set different color for each particle
-for i in range(neighbor_num):
-    particle_idx = neighbors[i]
-    particle_system.color[particle_idx] = [1.0, 0.0, 0.0]
-particle_system.color[origin_idx] = [0.0, 0.0, 1.0]
+# new particle system
+new_particle_num = 500
+new_particle_system = pa.ParticleSystem(new_particle_num)
+new_particle_system.random_initialize()
+
+# SPH interpolation
+neighbor_searcher.SPH_interpolation(new_particle_system.position,
+                                    particle_system.position,
+                                    new_particle_system.color,
+                                    new_particle_system.max_particles)
+
 
 # * basic canvas settings
 # set window
@@ -59,9 +59,10 @@ while window.running:
     scene.ambient_light((0.5, 0.5, 0.5))
 
     # * set scene
-    scene.particles(particle_system.position,
-                    radius=0.01,
-                    per_vertex_color=particle_system.color)
+    # new particle system
+    scene.particles(new_particle_system.position,
+                    per_vertex_color=new_particle_system.color,
+                    radius=0.01)
     canvas.scene(scene)
 
     # * show window
