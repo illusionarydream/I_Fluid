@@ -41,6 +41,8 @@ if __name__ == "__main__":
     # get scene
     scene = ti.ui.Scene()
 
+    falling = False
+
     # * Loop
     while window.running:
         # * set camera
@@ -52,8 +54,9 @@ if __name__ == "__main__":
         scene.ambient_light((0.5, 0.5, 0.5))
 
         # * update particle system
-        SPH_solver.compute_accelerations()
-        SPH_solver.update(dt)
+        if falling:
+            SPH_solver.compute_accelerations()
+            SPH_solver.update(dt)
 
         # * render particles
         scene.particles(SPH_solver.particle_system.position,
@@ -61,9 +64,14 @@ if __name__ == "__main__":
                         radius=0.01)
         canvas.scene(scene)
 
-        # * handle mouse input for camera rotation
+        # * handle mouse input and keyboard input
         camera.track_user_inputs(
             window, movement_speed=movement_speed, hold_key=ti.ui.LMB)
+
+        if window.is_pressed(ti.ui.ESCAPE):
+            break
+        if window.is_pressed(ti.ui.SPACE):
+            falling = not falling
 
         # * show window
         window.show()

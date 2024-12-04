@@ -20,4 +20,4 @@ $$
   - PCISPH will use the new density to calculate pressure.
   - Iterations: calculate the pressure gradient and update the position, density and pressure. When the density is closed to the target density, break the loop.
 - An easy demo:
-  ![](gallery/Peek-2024-12-04-20-46.gif)
+  ![](gallery/Peek-2024-12-04-21-58.gif)
