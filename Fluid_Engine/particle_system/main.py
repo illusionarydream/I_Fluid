@@ -4,31 +4,24 @@ from tqdm import tqdm
 import imageio
 import numpy as np
 import particle as pa
-import EOS
+import SPH
 import os
 
 
 if __name__ == "__main__":
 
     # * set device
-    ti.init(arch=ti.cpu, device_memory_GB=4)
+    ti.init(arch=ti.gpu, device_memory_fraction=0.8)
 
     # * object settings
-    vec3 = ti.types.vector(3, float)
-
-    # particle system
-    max_particles = 1500
-    particle_system = pa.ParticleSystem(max_particles)
-    particle_system.random_initialize()
-
-    # build neighbor searcher
-    neighbor_searcher = ns.NeighborSearcher(particle_system)
-
-    # build EOS
-    eos = EOS.EOS(particle_system, neighbor_searcher)
+    # build SPH solver
+    max_particles = 8000
+    cube_len = 20
+    SPH_solver = SPH.SPH_Solver(max_particles)
+    SPH_solver.uniform_initialize(cube_len)
 
     # System settings
-    dt = 4E-3
+    dt = 3E-4
 
     # * basic canvas settings
     # set window
@@ -45,15 +38,15 @@ if __name__ == "__main__":
     scene = ti.ui.Scene()
 
     # * Directory for saving frames
-    if_save = 1
+    if_save = 0
     output_dir = "output_frames"
     os.makedirs(output_dir, exist_ok=True)
 
     # * Frame index
-    frame_num = 1000
+    frame_index = 0
 
     # * Loop
-    for frame_index in tqdm(range(frame_num)):
+    while window.running:
         # * set camera
         camera.fov = 0.8
         camera.position(2, 0.5, 2)
@@ -65,17 +58,13 @@ if __name__ == "__main__":
         scene.ambient_light((0.5, 0.5, 0.5))
 
         # * update particle system
-        forces = ti.Vector.field(3, float, max_particles)
-        eos.update_EOS(particle_system)
-        eos.computePressureFromEos_force(forces, max_particles)
-        eos.computeViscosityFromEOS_force(forces, max_particles)
-
-        particle_system.update(forces, dt)
+        SPH_solver.compute_accelerations()
+        SPH_solver.update(dt)
 
         # * render particles
-        scene.particles(particle_system.position,
-                        per_vertex_color=particle_system.color,
-                        radius=0.02)
+        scene.particles(SPH_solver.particle_system.position,
+                        per_vertex_color=SPH_solver.particle_system.color,
+                        radius=0.01)
         canvas.scene(scene)
 
         # * save current frame as image
@@ -84,6 +73,7 @@ if __name__ == "__main__":
             frame_image = (frame_image * 255).astype(np.uint8)  # 转换为 uint8 类型
             imageio.imwrite(
                 f'{output_dir}/frame_{frame_index:04d}.png', frame_image)
+            frame_index += 1
 
         # * show window
         window.show()

@@ -19,4 +19,5 @@ $$
   - In each iteraton, PCISPH calculates gravity and viscosity firstly. And then, PCISPH estimates the new density of the particle.
   - PCISPH will use the new density to calculate pressure.
   - Iterations: calculate the pressure gradient and update the position, density and pressure. When the density is closed to the target density, break the loop.
-- Taichi has some unknown bugs for implementation.
+- An easy demo:
+  ![](gallery/Peek-2024-12-04-20-46.gif)

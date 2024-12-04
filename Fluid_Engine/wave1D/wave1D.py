@@ -4,18 +4,18 @@ import taichi as ti
 ti.init(arch=ti.gpu)
 
 # * object settings
-vec3 = ti.types.vector(3, ti.f32)
+vec3 = ti.types.vector(3, float)
 
 
 @ti.dataclass
 class Wave1D:
-    waveX: ti.f32
-    waveHeight: ti.f32
-    waveLength: ti.f32
-    waveVelocity: ti.f32
+    waveX: float
+    waveHeight: float
+    waveLength: float
+    waveVelocity: float
 
     @ti.func
-    def update(self, dt: ti.f32):
+    def update(self, dt: float):
         self.waveX += self.waveVelocity * dt
 
         # solve the boundary condition
@@ -27,13 +27,13 @@ class Wave1D:
             self.waveVelocity *= -1.0
 
     @ti.func
-    def getHeight(self, x: ti.f32) -> ti.f32:
+    def getHeight(self, x: float) -> float:
         return self.waveHeight * ti.exp(-(x - self.waveX) ** 2 / self.waveLength)
 
 
 # * kernel functions
 @ti.kernel
-def updateWaves(waves: ti.template(), dt: ti.f32):
+def updateWaves(waves: ti.template(), dt: float):
     for i in range(waves.shape[0]):
         waves[i].update(dt)
 
@@ -43,7 +43,7 @@ def drawWave(waves: ti.template(),
              img: ti.template(),
              width: int,
              height: int,
-             dx: ti.f32):
+             dx: float):
 
     for i, j in img:
         img[i, j] = vec3(0.0, 0.0, 0.0)
@@ -76,7 +76,7 @@ if __name__ == "__main__":
     waves[0] = Wave1D(0.0, 0.5, 0.02, 0.1)
     waves[1] = Wave1D(1.0, 0.2, 0.01, -0.05)
 
-    img = ti.Vector.field(3, ti.f32, (width, height))
+    img = ti.Vector.field(3, float, (width, height))
 
     # * Loop
     while gui.running:
