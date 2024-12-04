@@ -7,7 +7,6 @@ import particle as pa
 import SPH
 import os
 
-
 if __name__ == "__main__":
 
     # * set device
@@ -29,28 +28,23 @@ if __name__ == "__main__":
 
     # set canvas
     canvas = window.get_canvas()
-    canvas.set_background_color((1, 1, 1))
+    canvas.set_background_color((0.0, 0.0, 0.0))
 
     # get camera
     camera = ti.ui.Camera()
+    movement_speed = 0.002
+
+    camera.fov = 0.8
+    camera.position(2, 0.5, 2)
+    camera.lookat(0.5, 0.5, 0)
 
     # get scene
     scene = ti.ui.Scene()
 
-    # * Directory for saving frames
-    if_save = 0
-    output_dir = "output_frames"
-    os.makedirs(output_dir, exist_ok=True)
-
-    # * Frame index
-    frame_index = 0
-
     # * Loop
     while window.running:
         # * set camera
-        camera.fov = 0.8
-        camera.position(2, 0.5, 2)
-        camera.lookat(0.5, 0.5, 0)
+
         scene.set_camera(camera)
 
         # * set light
@@ -67,15 +61,9 @@ if __name__ == "__main__":
                         radius=0.01)
         canvas.scene(scene)
 
-        # * save current frame as image
-        if if_save:
-            frame_image = window.get_image_buffer_as_numpy()
-            frame_image = (frame_image * 255).astype(np.uint8)  # 转换为 uint8 类型
-            imageio.imwrite(
-                f'{output_dir}/frame_{frame_index:04d}.png', frame_image)
-            frame_index += 1
+        # * handle mouse input for camera rotation
+        camera.track_user_inputs(
+            window, movement_speed=movement_speed, hold_key=ti.ui.LMB)
 
         # * show window
         window.show()
-
-    print("Frames saved in:", output_dir)
