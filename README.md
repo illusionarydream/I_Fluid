@@ -13,3 +13,6 @@ $$
 &\nabla\cdot\mathbf{v}=0,\end{aligned}
 $$
 ### Particle System
+- Conventional particle system realized by SPH has amount of loss. User should tuning the parameters hardly. And the tuning process is such **STUPID**.
+- PCISPH solves this problem, giving a better results.
+- Taichi has some unknown bugs for implementation.

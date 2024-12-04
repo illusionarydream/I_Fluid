@@ -7,28 +7,29 @@ import numpy as np
 class NeighborSearcher:
     def __init__(self,
                  particle_system: pa.ParticleSystem,
-                 radius_ratio: float = 0.1,
-                 grid_resolution: int = 40,
-                 hash_ratio: float = 0.005,
+                 radius: float = 0.1,
+                 hash_ratio: float = 0.05,
                  max_neighbors: int = 100,
                  initial_density: float = 10000):
 
         # * particle system attributes
         self.max_particles = particle_system.max_particles
-        self.radius = 0.1
+        self.radius = radius
         self.ball_radius = 0.001 * self.radius
+
         self.position = particle_system.position
         self.mass = particle_system.mass
+        self.density = ti.field(ti.f32, shape=self.max_particles)
 
         # * neighbor searcher attributes
-        self.hash_table_size = int(hash_ratio * grid_resolution**3)
+        self.grid_resolution = 1 / radius
+        self.hash_table_size = int(hash_ratio * self.grid_resolution**3)
         self.hash_table = ti.field(ti.i32)
         self.S_node = ti.root.dense(
             ti.i, self.hash_table_size).dynamic(ti.j, 2048, chunk_size=64)
         self.S_node.place(self.hash_table)
 
         self.max_neighbors = max_neighbors
-        self.grid_resolution = grid_resolution
         self.neighbors = ti.field(ti.i32, shape=(
             self.max_particles, self.max_neighbors))
         self.neighbors_num = ti.field(ti.i32, shape=(self.max_particles))
@@ -36,12 +37,9 @@ class NeighborSearcher:
         # * SPH interpolation attributes
         self.kernel_radius = self.radius
         self.initial_density = initial_density
-        self.kernel_type = 0  # 0: Poly6, 1: Muller
         self.Muller_kernel_factor = 15 / (3.14159 * self.kernel_radius**3)
         self.Poly6_kernel_factor = 315 / (64 * 3.14159 * self.kernel_radius**9)
-        self.density = ti.field(ti.f32, shape=self.max_particles)
 
-    # * Grid Hashi"/home/illusionary/文档/计算机图形学/fluid simulation/I_Fluid/Fluid_Engine/particle_system/neighbor_search.py", line 287ng
     @ ti.func
     def hash_mapping(self, grid_idx: ti.template()) -> ti.i32:
         hash_value = (grid_idx[0] * 73856093) ^ (grid_idx[1]
@@ -50,7 +48,7 @@ class NeighborSearcher:
 
     @ ti.func
     def get_grid_idx(self, position: ti.template()) -> ti.template():
-        grid_idx = (position / self.radius).cast(ti.i32)
+        grid_idx = (position * self.grid_resolution).cast(ti.i32)
         return grid_idx
 
     @ ti.kernel

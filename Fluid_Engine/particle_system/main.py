@@ -7,88 +7,85 @@ import particle as pa
 import EOS
 import os
 
-# * set device
-ti.init(arch=ti.gpu)
-ti.init(device_memory_GB=4)
 
-# * object settings
-vec3 = ti.types.vector(3, float)
+if __name__ == "__main__":
 
-# particle system
-max_particles = 1500
-particle_system = pa.ParticleSystem(max_particles)
-particle_system.random_initialize()
+    # * set device
+    ti.init(arch=ti.cpu, device_memory_GB=4)
 
-# build neighbor searcher
-neighbor_searcher = ns.NeighborSearcher(particle_system)
+    # * object settings
+    vec3 = ti.types.vector(3, float)
 
-# build EOS
-eos = EOS.EOS(particle_system, neighbor_searcher)
+    # particle system
+    max_particles = 1500
+    particle_system = pa.ParticleSystem(max_particles)
+    particle_system.random_initialize()
 
-# System settings
-dt = 4E-3
+    # build neighbor searcher
+    neighbor_searcher = ns.NeighborSearcher(particle_system)
 
-# * basic canvas settings
-# set window
-window = ti.ui.Window("Test", (800, 800))
+    # build EOS
+    eos = EOS.EOS(particle_system, neighbor_searcher)
 
-# set canvas
-canvas = window.get_canvas()
-canvas.set_background_color((1, 1, 1))
+    # System settings
+    dt = 4E-3
 
-# get camera
-camera = ti.ui.Camera()
+    # * basic canvas settings
+    # set window
+    window = ti.ui.Window("Test", (800, 800))
 
-# get scene
-scene = ti.ui.Scene()
+    # set canvas
+    canvas = window.get_canvas()
+    canvas.set_background_color((1, 1, 1))
 
-# * Directory for saving frames
-if_save = 1
-output_dir = "output_frames"
-os.makedirs(output_dir, exist_ok=True)
+    # get camera
+    camera = ti.ui.Camera()
 
-# * Frame index
-frame_num = 1000
+    # get scene
+    scene = ti.ui.Scene()
 
-bar = tqdm(total=frame_num)
+    # * Directory for saving frames
+    if_save = 1
+    output_dir = "output_frames"
+    os.makedirs(output_dir, exist_ok=True)
 
-# * Loop
-for frame_index in tqdm(range(frame_num)):
-    # * set camera
-    camera.fov = 0.8
-    camera.position(2, 0.5, 2)
-    camera.lookat(0.5, 0.5, 0)
-    scene.set_camera(camera)
+    # * Frame index
+    frame_num = 1000
 
-    # * set light
-    scene.point_light(pos=[2, 2, 2], color=(1, 1, 1))
-    scene.ambient_light((0.5, 0.5, 0.5))
+    # * Loop
+    for frame_index in tqdm(range(frame_num)):
+        # * set camera
+        camera.fov = 0.8
+        camera.position(2, 0.5, 2)
+        camera.lookat(0.5, 0.5, 0)
+        scene.set_camera(camera)
 
-    # * update particle system
-    forces = ti.Vector.field(3, float, max_particles)
-    eos.update_EOS(particle_system)
-    eos.computePressureFromEos_force(forces, max_particles)
-    eos.computeViscosityFromEOS_force(forces, max_particles)
+        # * set light
+        scene.point_light(pos=[2, 2, 2], color=(1, 1, 1))
+        scene.ambient_light((0.5, 0.5, 0.5))
 
-    particle_system.update(forces, dt)
+        # * update particle system
+        forces = ti.Vector.field(3, float, max_particles)
+        eos.update_EOS(particle_system)
+        eos.computePressureFromEos_force(forces, max_particles)
+        eos.computeViscosityFromEOS_force(forces, max_particles)
 
-    # * render particles
-    scene.particles(particle_system.position,
-                    per_vertex_color=particle_system.color,
-                    radius=0.02)
-    canvas.scene(scene)
+        particle_system.update(forces, dt)
 
-    # * save current frame as image
-    if if_save:
-        frame_image = window.get_image_buffer_as_numpy()
-        frame_image = (frame_image * 255).astype(np.uint8)  # 转换为 uint8 类型
-        imageio.imwrite(
-            f'{output_dir}/frame_{frame_index:04d}.png', frame_image)
+        # * render particles
+        scene.particles(particle_system.position,
+                        per_vertex_color=particle_system.color,
+                        radius=0.02)
+        canvas.scene(scene)
 
-    # * show window
-    bar.update(1)
-    window.show()
+        # * save current frame as image
+        if if_save:
+            frame_image = window.get_image_buffer_as_numpy()
+            frame_image = (frame_image * 255).astype(np.uint8)  # 转换为 uint8 类型
+            imageio.imwrite(
+                f'{output_dir}/frame_{frame_index:04d}.png', frame_image)
 
-bar.close()
+        # * show window
+        window.show()
 
-print("Frames saved in:", output_dir)
+    print("Frames saved in:", output_dir)
