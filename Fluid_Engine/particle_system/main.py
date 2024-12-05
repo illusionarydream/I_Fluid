@@ -42,6 +42,7 @@ if __name__ == "__main__":
     scene = ti.ui.Scene()
 
     falling = False
+    space_pressed = False
 
     # * Loop
     while window.running:
@@ -68,10 +69,14 @@ if __name__ == "__main__":
         camera.track_user_inputs(
             window, movement_speed=movement_speed, hold_key=ti.ui.LMB)
 
+        # break
         if window.is_pressed(ti.ui.ESCAPE):
             break
-        if window.is_pressed(ti.ui.SPACE):
+
+        # start
+        if window.is_pressed(ti.ui.SPACE) and not space_pressed:
             falling = not falling
+            space_pressed = True
 
         # * show window
         window.show()
