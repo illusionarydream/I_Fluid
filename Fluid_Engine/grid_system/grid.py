@@ -22,17 +22,24 @@ class Grid2D:
         # boundary condition
         self.boundary_type = "Dirichlet"
 
+        # pressure field
+        self.pressure = ti.field(dtype=ti.f32, shape=(res_x, res_y))
+
         # pressure solver
         self.pressure_matrix = ti.linalg.SparseMatrixBuilder(
             res_x * res_y, res_x * res_y, max_num_triplets=7*res_x*res_y)
         self.pressure_X = ti.ndarray(ti.i32, shape=(res_x * res_y))
         self.pressure_b = ti.ndarray(ti.f32, shape=(res_x * res_y))
+
+        # precompute the pressure matrix
         self.solver = ti.linalg.SparseSolver(solver_type="LLT")
-        # pressure field
-        self.pressure = ti.field(dtype=ti.f32, shape=(res_x, res_y))
+        self.build_pressure_matrix(self.pressure_matrix)
+        K = self.pressure_matrix.build()
+        self.solver.compute(K)
 
         # physical constants
         self.gravity = 9.8
+        self.standard_pressure = 0.0
         self.miu = 0.001  # dynamic viscosity/diffusion coefficient
 
     # * gradient operation
@@ -126,14 +133,14 @@ class Grid2D:
 
         for i, j in self.velocity_x:
             x = i * self.dx
-            y = j * self.dy
+            y = (j + 0.5) * self.dy
             x -= self.velocity_x[i, j] * dt
 
             self.velocity_x[i, j] = self.interpolate_centroid(
                 self.velocity_x, bound_vel.x, x, y)
 
         for i, j in self.velocity_y:
-            x = i * self.dx
+            x = (i + 0.5) * self.dx
             y = j * self.dy
             y -= self.velocity_y[i, j] * dt
 
@@ -163,79 +170,84 @@ class Grid2D:
         return i * self.res_y + j
 
     @ ti.kernel
-    def set_pressure_matrix(self, pressure_matrix: ti.types.sparse_matrix_builder(), pressure_b: ti.types.ndarray(),  bound_pressure: float, dt: float, vel_x: ti.template(), vel_y: ti.template()):
-        coeff_x = dt / self.dx
-        coeff_y = dt / self.dy
+    def build_pressure_matrix(self, pressure_matrix: ti.types.sparse_matrix_builder()):
+        coeff_x = 1 / self.dx
+        coeff_y = 1 / self.dy
 
         for i, j in self.pressure:
             # i, j
             idx = self.get_idx(i, j)
             pressure_matrix[idx, idx] += 2 * coeff_x + 2 * coeff_y
-
-            pressure_b[idx] += (vel_x[i + 1, j] - vel_x[i, j]) + \
-                (vel_y[i, j + 1] - vel_y[i, j])
-
             # i+1, j
             if i + 1 < self.res_x:
                 pressure_matrix[idx, self.get_idx(i + 1, j)] -= coeff_x
-            else:
-                pressure_b[idx] += coeff_x * bound_pressure
-
             # i-1, j
             if i > 0:
                 pressure_matrix[idx, self.get_idx(i - 1, j)] -= coeff_x
-            else:
-                pressure_b[idx] += coeff_x * bound_pressure
-
             # i, j+1
             if j + 1 < self.res_y:
                 pressure_matrix[idx, self.get_idx(i, j + 1)] -= coeff_y
-            else:
-                pressure_b[idx] += coeff_y * bound_pressure
-
             # i, j-1
             if j > 0:
                 pressure_matrix[idx, self.get_idx(i, j - 1)] -= coeff_y
-            else:
-                pressure_b[idx] += coeff_y * bound_pressure
+
+    @ ti.kernel
+    def build_pressure_b(self, pressure_b: ti.types.ndarray(), bound_pressure: float, dt: float, vel_x: ti.template(), vel_y: ti.template()):
+        inv_dt = 1 / dt
+
+        for i, j in self.pressure:
+            # i, j
+            idx = self.get_idx(i, j)
+
+            # pressure_b[idx] += (vel_x[i + 1, j] - vel_x[i, j] +
+            # vel_y[i, j + 1] - vel_y[i, j]) * inv_dt
+
+            # i+1, j
+            if i == self.res_x - 1:
+                pressure_b[idx] += bound_pressure
+            # i-1, j
+            if i == 0:
+                pressure_b[idx] += bound_pressure
+            # i, j+1
+            if j == self.res_y - 1:
+                pressure_b[idx] += bound_pressure
+            # i, j-1
+            if j == 0:
+                pressure_b[idx] += bound_pressure
 
     def update_velocity(self, dt: float):
 
         # * add gravity
-        # self.add_gravity(dt)
+        self.add_gravity(dt)
 
         # * add advection
-        # bound_vel = ti.Vector([0.0, 0.0])
-        # self.interpolate_centroid_velocity(
-        # self.velocity_x, self.velocity_y, bound_vel, self.vel_centroid)
+        bound_vel = ti.Vector([0.0, 0.0])
+        self.interpolate_centroid_velocity(
+            self.velocity_x, self.velocity_y, bound_vel, self.vel_centroid)
 
-        # self.add_advection(dt, bound_vel)
+        self.add_advection(dt, bound_vel)
 
         # * add diffusion
-        # self.laplacian(self.velocity_x, self.velocity_y,
-        #    bound_vel.x, self.vel_lap_x, self.vel_lap_y)
+        self.laplacian(self.velocity_x, self.velocity_y,
+                       bound_vel.x, self.vel_lap_x, self.vel_lap_y)
 
-        # print(self.vel_lap_x[0, 0], self.vel_lap_y[0, 0])
-
-        # self.add_diffusion(dt)
+        self.add_diffusion(dt)
 
         # * add pressure projection
         # initial the pressure field
         self.pressure_b.fill(0)
 
         # fill pressure matrix
-        self.set_pressure_matrix(
-            self.pressure_matrix, self.pressure_b, 10.0, dt, self.velocity_x, self.velocity_y)
+        self.build_pressure_b(
+            self.pressure_b, self.standard_pressure, dt, self.velocity_x, self.velocity_y)
 
         # solve process
-        K = self.pressure_matrix.build()
-        # self.solver.analyze_pattern(K)
-        # self.solver.factorize(K)
-        self.solver.compute(K)
         self.pressure.from_numpy(self.solver.solve(self.pressure_b).to_numpy().reshape(
             (self.res_x, self.res_y)))
 
-        self.gradient(self.pressure, 0.0, self.vel_grad_x, self.vel_grad_y)
+        # compute pressure gradient
+        self.gradient(self.pressure, self.standard_pressure,
+                      self.vel_grad_x, self.vel_grad_y)
         self.add_pressure_gradient(dt)
 
     @ ti.kernel
