@@ -1,60 +1,47 @@
 import taichi as ti
 
+arch = ti.cpu  # or ti.cuda
+ti.init(arch=arch)
 
-# * set device
-ti.init(arch=ti.gpu)
+n = 4
 
-
-# * object settings
-vec3 = ti.types.vector(3, float)
-
-
-@ti.dataclass
-class Ball:
-    center: vec3
-    radius: float
-    color: vec3
+K = ti.linalg.SparseMatrixBuilder(n, n, max_num_triplets=100)
+b = ti.ndarray(ti.f32, shape=n)
 
 
-balls_field = ti.Struct.field({
-    "center": vec3,
-    "radius": float,
-    "color": vec3
-}, shape=(1,))
+@ti.kernel
+def fill(A: ti.types.sparse_matrix_builder(), b: ti.template(), interval: ti.i32):
+    for i in range(n):
+        A[i, i] += 2.0
+
+        if i % interval == 0:
+            b[i] += 1.0
 
 
-# * basic canvas settings
-# set window
-window = ti.ui.Window("Test", (800, 800))
+fill(K, b, 3)
 
-# set canvas
-canvas = window.get_canvas()
-canvas.set_background_color((1, 1, 1))
-
-# get camera
-camera = ti.ui.Camera()
-
-# get scene
-scene = ti.ui.Scene()
-
-
-# * Loop
-while window.running:
-
-    # set camera
-    camera.fov = 0.8
-    camera.position(0, 0, 3)
-    camera.lookat(0, 0, 0)
-    scene.set_camera(camera)
-
-    # set scene
-    scene.point_light(pos=[2, 2, 2], color=(1, 1, 1))
-    scene.ambient_light((0.5, 0.5, 0.5))
-
-    # set particles
-    ball = Ball(center=[0, 0, 0], radius=0.5, color=(1, 0, 0))
-    balls_field[0] = ball
-    scene.particles(balls_field.center, ball.radius, ball.color)
-    canvas.scene(scene)
-
-    window.show()
+A = K.build()
+print(">>>> Matrix A:")
+print(A)
+print(">>>> Vector b:")
+print(b)
+# outputs:
+# >>>> Matrix A:
+# [2, 0, 0, 0]
+# [0, 2, 0, 0]
+# [0, 0, 2, 0]
+# [0, 0, 0, 2]
+# >>>> Vector b:
+# [1. 0. 0. 1.]
+solver = ti.linalg.SparseSolver(solver_type="LLT")
+solver.analyze_pattern(A)
+solver.factorize(A)
+x = solver.solve(b)
+isSuccess = solver.info()
+print(">>>> Solve sparse linear systems Ax = b with the solution x:")
+print(x)
+print(f">>>> Computation was successful?: {isSuccess}")
+# outputs:
+# >>>> Solve sparse linear systems Ax = b with the solution x:
+# [0.5 0.  0.  0.5]
+# >>>> Computation was successful?: True
