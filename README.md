@@ -32,3 +32,12 @@ $$
   ![Alt Text](gallery/Peek-2024-12-04-21-58.gif)
 
 ### Grid System
+
+- Staggered Grid System
+  - Gravity.
+  - Advection: semi-lagrangian method.
+  - Diffusion: laplacian matrix.
+  - Pressure: pressure projection method and apply fft solver.
+  - Buoyancy force.
+- An easy demo:
+  ![Alt Text](gallery/Peek-2024-12-10-19-35.gif)
