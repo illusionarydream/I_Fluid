@@ -134,27 +134,47 @@ class Grid2D:
         for i, j in self.velocity_x:
             x = i * self.dx
             y = (j + 0.5) * self.dy
-            x -= self.velocity_x[i, j] * dt
 
-            self.velocity_x[i, j] = self.interpolate_centroid(
-                self.velocity_x, bound_vel.x, x, y)
+            # boundary condition
+            if i == 0 or i == self.res_x:
+                self.velocity_x[i, j] = bound_vel.x
+
+            for t in range(4):
+                x -= self.velocity_x[i, j] * dt * 0.25
+                self.velocity_x[i, j] = self.interpolate_centroid(
+                    self.velocity_x, bound_vel.x, x, y)
 
         for i, j in self.velocity_y:
             x = (i + 0.5) * self.dx
             y = j * self.dy
-            y -= self.velocity_y[i, j] * dt
 
-            self.velocity_y[i, j] = self.interpolate_centroid(
-                self.velocity_y, bound_vel.y, x, y)
+            # boundary condition
+            if j == 0 or j == self.res_y:
+                self.velocity_y[i, j] = bound_vel.y
+
+            for t in range(4):
+                y -= self.velocity_y[i, j] * dt * 0.25
+                self.velocity_y[i, j] = self.interpolate_centroid(
+                    self.velocity_y, bound_vel.y, x, y)
 
     # update diffusion
+
     @ ti.kernel
     def add_diffusion(self, dt: float):
         for i, j in self.velocity_x:
             self.velocity_x[i, j] += self.vel_lap_x[i, j] * self.miu * dt
 
+            # boundary condition
+            if i == 0 or i == self.res_x:
+                self.velocity_x[i, j] = 0.0
+
         for i, j in self.velocity_y:
-            self.velocity_y[i, j] += self.vel_lap_y[i, j] * self.miu * dt
+            if j > 0 and j < self.res_y:
+                self.velocity_y[i, j] += self.vel_lap_y[i, j] * self.miu * dt
+
+            # boundary condition
+            if j == 0 or j == self.res_y:
+                self.velocity_y[i, j] = 0.0
 
     # update pressure gradient
     @ ti.kernel
@@ -194,26 +214,27 @@ class Grid2D:
     @ ti.kernel
     def build_pressure_b(self, pressure_b: ti.types.ndarray(), bound_pressure: float, dt: float, vel_x: ti.template(), vel_y: ti.template()):
         inv_dt = 1 / dt
+        coeff_x = 1 / self.dx
+        coeff_y = 1 / self.dy
 
         for i, j in self.pressure:
             # i, j
             idx = self.get_idx(i, j)
 
-            # pressure_b[idx] += (vel_x[i + 1, j] - vel_x[i, j] +
-            # vel_y[i, j + 1] - vel_y[i, j]) * inv_dt
-
+            pressure_b[idx] += (vel_x[i, j] - vel_x[i + 1, j] +
+                                vel_y[i, j] - vel_y[i, j + 1]) * inv_dt
             # i+1, j
             if i == self.res_x - 1:
-                pressure_b[idx] += bound_pressure
+                pressure_b[idx] += bound_pressure * coeff_x
             # i-1, j
             if i == 0:
-                pressure_b[idx] += bound_pressure
+                pressure_b[idx] += bound_pressure * coeff_x
             # i, j+1
             if j == self.res_y - 1:
-                pressure_b[idx] += bound_pressure
+                pressure_b[idx] += bound_pressure * coeff_y
             # i, j-1
             if j == 0:
-                pressure_b[idx] += bound_pressure
+                pressure_b[idx] += bound_pressure * coeff_y
 
     def update_velocity(self, dt: float):
 
@@ -248,6 +269,7 @@ class Grid2D:
         # compute pressure gradient
         self.gradient(self.pressure, self.standard_pressure,
                       self.vel_grad_x, self.vel_grad_y)
+
         self.add_pressure_gradient(dt)
 
     @ ti.kernel
@@ -276,6 +298,7 @@ if __name__ == "__main__":
     pixel_field = ti.Vector.field(3, dtype=ti.f32, shape=gui_shape)
 
     while gui.running:
+        # for i in range(5):
 
         # Update the velocity field
         grid.update_velocity(0.0001)
