@@ -10,7 +10,7 @@ b = ti.ndarray(ti.f32, shape=n)
 
 
 @ti.kernel
-def fill(A: ti.types.sparse_matrix_builder(), b: ti.template(), interval: ti.i32):
+def fill(A: ti.types.sparse_matrix_builder(), b: ti.types.ndarray(), interval: ti.i32):
     for i in range(n):
         A[i, i] += 2.0
 
@@ -39,7 +39,7 @@ solver.factorize(A)
 x = solver.solve(b)
 isSuccess = solver.info()
 print(">>>> Solve sparse linear systems Ax = b with the solution x:")
-print(x)
+print(x.to_numpy())
 print(f">>>> Computation was successful?: {isSuccess}")
 # outputs:
 # >>>> Solve sparse linear systems Ax = b with the solution x:

@@ -41,3 +41,12 @@ $$
   - Buoyancy force.
 - An easy demo:
   ![Alt Text](gallery/Peek-2024-12-10-19-35.gif)
+
+
+### Hybrid System
+
+- PIC: particles in cells -> **FLIP**
+- Centroid grid: easy to handle but poor performance
+- Pressure compute: 
+  - Density based: directly use the weight as the density.
+  - Pressure projection: a more precise method (but I haven't debug successfully yet, maybe some boundary problems)

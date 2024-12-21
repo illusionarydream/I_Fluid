@@ -28,7 +28,6 @@ class Grid2D:
         # pressure solver
         self.pressure_matrix = ti.linalg.SparseMatrixBuilder(
             res_x * res_y, res_x * res_y, max_num_triplets=7*res_x*res_y)
-        self.pressure_X = ti.ndarray(ti.i32, shape=(res_x * res_y))
         self.pressure_b = ti.ndarray(ti.f32, shape=(res_x * res_y))
 
         # precompute the pressure matrix

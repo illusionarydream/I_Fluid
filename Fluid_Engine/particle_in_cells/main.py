@@ -10,15 +10,15 @@ if __name__ == "__main__":
 
     # * object settings
     # build SPH solver
-    max_particles = 1000
+    max_particles = 27000
     grid_resolution = 20
     # System settings
     dt = 3E-4
     # build particle system
     particle_system = PS(max_particles=max_particles,
                          grid_resolution=grid_resolution)
-    particle_system.uniform_initialize(max_corners=ti.Vector([0.3, 1.0, 0.3]),
-                                       min_corners=ti.Vector([0, 0.7, 0]))
+    particle_system.uniform_initialize(max_corners=ti.Vector([0.5, 1.0, 0.5]),
+                                       min_corners=ti.Vector([0.0, 0.5, 0.0]))
 
     # * basic canvas settings
     # set window
@@ -34,13 +34,14 @@ if __name__ == "__main__":
 
     camera.fov = 0.8
     camera.position(2, 0.5, 2)
-    camera.lookat(0.5, 0.5, 0)
+    camera.lookat(0.5, 0.5, 0.5)
 
     # get scene
     scene = ti.ui.Scene()
 
     # * Loop
     while window.running:
+        # for t in range(10):
         # * set camera
 
         scene.set_camera(camera)
