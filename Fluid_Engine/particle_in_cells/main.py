@@ -10,10 +10,10 @@ if __name__ == "__main__":
 
     # * object settings
     # build SPH solver
-    max_particles = 27000
-    grid_resolution = 20
+    max_particles = 8000
+    grid_resolution = 30
     # System settings
-    dt = 3E-4
+    dt = 4E-3
     # build particle system
     particle_system = PS(max_particles=max_particles,
                          grid_resolution=grid_resolution)
@@ -33,7 +33,7 @@ if __name__ == "__main__":
     movement_speed = 0.02
 
     camera.fov = 0.8
-    camera.position(2, 0.5, 2)
+    camera.position(2, 1, 2)
     camera.lookat(0.5, 0.5, 0.5)
 
     # get scene
@@ -41,7 +41,7 @@ if __name__ == "__main__":
 
     # * Loop
     while window.running:
-        # for t in range(10):
+        # for t in range(1):
         # * set camera
 
         scene.set_camera(camera)

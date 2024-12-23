@@ -49,4 +49,6 @@ $$
 - Centroid grid: easy to handle but poor performance
 - Pressure compute: 
   - Density based: directly use the weight as the density.
-  - Pressure projection: a more precise method (but I haven't debug successfully yet, maybe some boundary problems)
+  - Pressure projection: a more precise method
+- An easy demo:
+  ![Alt Text](gallery/Peek-2024-12-23-14-37.gif)

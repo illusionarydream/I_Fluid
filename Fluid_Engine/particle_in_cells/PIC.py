@@ -28,32 +28,31 @@ class ParticleSystem:
             dtype=ti.f32, shape=(self.grid_resolution + 1, self.grid_resolution + 1, self.grid_resolution + 1))
         self.delta_grid_vel = ti.Vector.field(
             3, dtype=ti.f32, shape=(self.grid_resolution + 1, self.grid_resolution + 1, self.grid_resolution + 1))
+        self.grid_type = ti.field(dtype=ti.i32, shape=(
+            self.grid_resolution + 1, self.grid_resolution + 1, self.grid_resolution + 1))
 
         # pressure variables initialization
         res = (self.grid_resolution + 1) ** 3
+        self.fluid_num = 0
+        self.G2L = ti.field(dtype=ti.i32, shape=res)
+        self.L2G = ti.Vector.field(3, dtype=ti.i32, shape=res)
         self.pressure_X = ti.field(dtype=ti.f32, shape=(
             self.grid_resolution + 1, self.grid_resolution + 1, self.grid_resolution + 1))
-        self.pressure_matrix = ti.linalg.SparseMatrixBuilder(
-            num_rows=res, num_cols=res, max_num_triplets=res * 7)
-        self.pressure_b = ti.ndarray(shape=res, dtype=ti.f32)
-
-        # pressure solver
         self.solver = ti.linalg.SparseSolver(solver_type="LLT")
-        self.build_pressure_matrix(self.pressure_matrix)
-        K = self.pressure_matrix.build()
-        self.solver.analyze_pattern(K)
-        self.solver.factorize(K)
 
         # physics settings
         self.gravity = ti.Vector([0, -9.8, 0])
         self.beta_viscosity = 1E-3
-        self.beta_pressure = 3E-2
+        self.beta_pressure = 4E-1
         self.beta_collision = 1.5
 
         # boundary settings
         self.velocity_bound = ti.Vector([0.0, 0.0, 0.0])
         self.pressure_bound = 0.0
         self.damping = 1.0
+
+        # collision settings
+        self.thickness = 0.00001
 
     # * Grid operation
     # get grid index
@@ -75,13 +74,13 @@ class ParticleSystem:
 
     @ ti.func
     def get_grid_pressure(self, i, j, k):
-        # pressure = self.pressure_bound
-        # if 0 <= i <= self.grid_resolution and 0 <= j <= self.grid_resolution and 0 <= k <= self.grid_resolution:
-        # pressure = self.pressure_X[i, j, k]
-        pressure = 27.0
+        pressure = self.pressure_bound
         if 0 <= i <= self.grid_resolution and 0 <= j <= self.grid_resolution and 0 <= k <= self.grid_resolution:
-            if self.grid_weight[i, j, k] > pressure:
-                pressure = self.grid_weight[i, j, k]
+            pressure = self.pressure_X[i, j, k]
+        # pressure = 3.0
+        # if 0 <= i <= self.grid_resolution and 0 <= j <= self.grid_resolution and 0 <= k <= self.grid_resolution:
+        #     if self.grid_weight[i, j, k] > 0.001:
+        #         pressure = self.grid_weight[i, j, k]
 
         return pressure
 
@@ -134,7 +133,7 @@ class ParticleSystem:
 
     # update pressure
 
-    @ti.func
+    @ ti.func
     def get_idx(self, i, j, k):
         return i * (self.grid_resolution + 1) ** 2 + j * (self.grid_resolution + 1) + k
 
@@ -142,26 +141,54 @@ class ParticleSystem:
     def build_pressure_matrix(self, pressure_matrix: ti.types.sparse_matrix_builder()):
         for i, j, k in self.grid_vel:
             idx = self.get_idx(i, j, k)
-            pressure_matrix[idx, idx] += 6
 
-            # i+1, j, k
-            if i < self.grid_resolution:
-                pressure_matrix[idx, self.get_idx(i + 1, j, k)] -= 1
-            # i-1, j, k
-            if i > 0:
-                pressure_matrix[idx, self.get_idx(i - 1, j, k)] -= 1
-            # i, j+1, k
-            if j < self.grid_resolution:
-                pressure_matrix[idx, self.get_idx(i, j + 1, k)] -= 1
-            # i, j-1, k
-            if j > 0:
-                pressure_matrix[idx, self.get_idx(i, j - 1, k)] -= 1
-            # i, j, k+1
-            if k < self.grid_resolution:
-                pressure_matrix[idx, self.get_idx(i, j, k + 1)] -= 1
-            # i, j, k-1
-            if k > 0:
-                pressure_matrix[idx, self.get_idx(i, j, k - 1)] -= 1
+            if self.grid_type[i, j, k] == 1:  # fluid
+                cnt = 0.0
+
+                # i+1, j, k
+                if i < self.grid_resolution and self.grid_type[i + 1, j, k] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i + 1, j, k)]] -= 1
+                elif i < self.grid_resolution and self.grid_type[i + 1, j, k] == 0:
+                    cnt += 0.5
+                    # i-1, j, k
+                if i > 0 and self.grid_type[i - 1, j, k] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i - 1, j, k)]] -= 1
+                elif i > 0 and self.grid_type[i - 1, j, k] == 0:
+                    cnt += 0.5
+                # i, j+1, k
+                if j < self.grid_resolution and self.grid_type[i, j + 1, k] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i, j + 1, k)]] -= 1
+                elif j < self.grid_resolution and self.grid_type[i, j + 1, k] == 0:
+                    cnt += 0.5
+                # i, j-1, k
+                if j > 0 and self.grid_type[i, j - 1, k] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i, j - 1, k)]] -= 1
+                elif j > 0 and self.grid_type[i, j - 1, k] == 0:
+                    cnt += 0.5
+                # i, j, k+1
+                if k < self.grid_resolution and self.grid_type[i, j, k + 1] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i, j, k + 1)]] -= 1
+                elif k < self.grid_resolution and self.grid_type[i, j, k + 1] == 0:
+                    cnt += 0.5
+                # i, j, k-1
+                if k > 0 and self.grid_type[i, j, k - 1] == 1:
+                    cnt += 1.0
+                    pressure_matrix[self.G2L[idx],
+                                    self.G2L[self.get_idx(i, j, k - 1)]] -= 1
+                elif k > 0 and self.grid_type[i, j, k - 1] == 0:
+                    cnt += 0.5
+
+                pressure_matrix[self.G2L[idx], self.G2L[idx]] += cnt
 
     @ ti.kernel
     def build_pressure_b(self, pressure_b: ti.types.ndarray(), dt: ti.f32):
@@ -169,46 +196,84 @@ class ParticleSystem:
 
         for i, j, k in self.grid_vel:
             idx = self.get_idx(i, j, k)
-            # delta_vel = self.get_grid_velocity(i - 1, j, k) - self.get_grid_velocity(i + 1, j, k) +\
-            #     self.get_grid_velocity(i, j - 1, k) - self.get_grid_velocity(i, j + 1, k) + \
-            #     self.get_grid_velocity(i, j, k - 1) - \
-            #     self.get_grid_velocity(i, j, k + 1)
-            # pressure_b[idx] += coeff * \
-            #     (delta_vel[0] + delta_vel[1] + delta_vel[2])
 
-            pressure_b[idx] += (self.get_grid_velocity(i - 1, j, k)[0] - self.get_grid_velocity(i, j, k)[0] +
-                                self.get_grid_velocity(i, j - 1, k)[1] - self.get_grid_velocity(i, j, k)[1] +
-                                self.get_grid_velocity(i, j, k - 1)[2] - self.get_grid_velocity(i, j, k)[2]) * coeff
+            if self.grid_type[i, j, k] == 1:  # fluid
 
-            cnt = 0
-            if i == 0:
-                cnt += 1
-            if i == self.grid_resolution:
-                cnt += 1
-            if j == 0:
-                cnt += 1
-            if j == self.grid_resolution:
-                cnt += 1
-            if k == 0:
-                cnt += 1
-            if k == self.grid_resolution:
-                cnt += 1
+                # no boundary condition
+                no_boundary_sum = 0.0
+                if i > 0 and self.grid_type[i - 1, j, k] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i - 1, j, k)
+                                        [0] - self.get_grid_velocity(i, j, k)[0])
+                if i < self.grid_resolution and self.grid_type[i + 1, j, k] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i, j, k)
+                                        [0] - self.get_grid_velocity(i + 1, j, k)[0])
+                if j > 0 and self.grid_type[i, j - 1, k] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i, j - 1, k)
+                                        [1] - self.get_grid_velocity(i, j, k)[1])
+                if j < self.grid_resolution and self.grid_type[i, j + 1, k] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i, j, k)
+                                        [1] - self.get_grid_velocity(i, j + 1, k)[1])
+                if k > 0 and self.grid_type[i, j, k - 1] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i, j, k - 1)
+                                        [2] - self.get_grid_velocity(i, j, k)[2])
+                if k < self.grid_resolution and self.grid_type[i, j, k + 1] == 1:
+                    no_boundary_sum += (self.get_grid_velocity(i, j, k)
+                                        [2] - self.get_grid_velocity(i, j, k + 1)[2])
+                pressure_b[self.G2L[idx]] += no_boundary_sum * coeff
 
-            pressure_b[idx] += cnt * self.pressure_bound
+                # boundary condition
+                boundary_sum = 0.0
+                if i == 0:
+                    boundary_sum += self.velocity_bound[0]
+                if i == self.grid_resolution:
+                    boundary_sum -= self.velocity_bound[0]
+                if j == 0:
+                    boundary_sum += self.velocity_bound[1]
+                if j == self.grid_resolution:
+                    boundary_sum -= self.velocity_bound[1]
+                if k == 0:
+                    boundary_sum += self.velocity_bound[2]
+                if k == self.grid_resolution:
+                    boundary_sum -= self.velocity_bound[2]
+
+                pressure_b[self.G2L[idx]] += boundary_sum * coeff
 
     @ ti.kernel
-    def update_pressure(self, dt: ti.f32):
+    def _update_pressure(self, dt: ti.f32):
         coeff = dt / self.dd
 
         for i, j, k in self.grid_vel:
 
             pressure_grad = ti.Vector([0.0, 0.0, 0.0])
-            pressure_grad[0] = self.get_grid_pressure(
-                i - 1, j, k) - self.get_grid_pressure(i + 1, j, k)
-            pressure_grad[1] = self.get_grid_pressure(
-                i, j - 1, k) - self.get_grid_pressure(i, j + 1, k)
-            pressure_grad[2] = self.get_grid_pressure(
-                i, j, k - 1) - self.get_grid_pressure(i, j, k + 1)
+
+            # no boundary
+            if i > 0 and i < self.grid_resolution and j > 0 and j < self.grid_resolution and k > 0 and k < self.grid_resolution:
+                pressure_grad[0] = self.get_grid_pressure(
+                    i - 1, j, k) - self.get_grid_pressure(i + 1, j, k)
+                pressure_grad[1] = self.get_grid_pressure(
+                    i, j - 1, k) - self.get_grid_pressure(i, j + 1, k)
+                pressure_grad[2] = self.get_grid_pressure(
+                    i, j, k - 1) - self.get_grid_pressure(i, j, k + 1)
+
+            # boundary
+            if i == 0:
+                pressure_grad[0] = self.get_grid_pressure(
+                    i, j, k) - self.get_grid_pressure(i + 1, j, k)
+            if i == self.grid_resolution:
+                pressure_grad[0] = self.get_grid_pressure(
+                    i - 1, j, k) - self.get_grid_pressure(i, j, k)
+            if j == 0:
+                pressure_grad[1] = self.get_grid_pressure(
+                    i, j, k) - self.get_grid_pressure(i, j + 1, k)
+            if j == self.grid_resolution:
+                pressure_grad[1] = self.get_grid_pressure(
+                    i, j - 1, k) - self.get_grid_pressure(i, j, k)
+            if k == 0:
+                pressure_grad[2] = self.get_grid_pressure(
+                    i, j, k) - self.get_grid_pressure(i, j, k + 1)
+            if k == self.grid_resolution:
+                pressure_grad[2] = self.get_grid_pressure(
+                    i, j, k - 1) - self.get_grid_pressure(i, j, k)
 
             self.delta_grid_vel[i, j, k] += pressure_grad * \
                 self.beta_pressure * coeff
@@ -216,8 +281,41 @@ class ParticleSystem:
             # set the boundary
             self.set_boundary_velocity(i, j, k)
 
-    # * P2C and C2P transfer
-    # linear interpolation
+    def build_pressure_X(self, pressure_X: ti.template(), pressure_b: ti.types.ndarray()):
+        for idx in range(self.fluid_num):
+            i, j, k = self.L2G[idx]
+            pressure_X[i, j, k] = pressure_b[idx]
+
+    def update_pressure(self, dt):
+
+        # build sparse matrix
+        pressure_matrix = ti.linalg.SparseMatrixBuilder(
+            num_rows=self.fluid_num, num_cols=self.fluid_num, max_num_triplets=self.fluid_num * 7)
+        self.build_pressure_matrix(pressure_matrix)
+        K = pressure_matrix.build()
+        # pressure solver
+        self.solver.analyze_pattern(K)
+        self.solver.factorize(K)
+        # build pressure b
+        pressure_b = ti.ndarray(shape=self.fluid_num, dtype=ti.f32)
+        pressure_b.fill(0.0)
+        self.build_pressure_b(pressure_b, dt)
+        # solve pressure
+        self.pressure_X.fill(0.0)
+        self.build_pressure_X(
+            self.pressure_X, self.solver.solve(pressure_b).to_numpy())
+        # update velocity
+        self._update_pressure(dt)
+
+    @ ti.func
+    def spline(self, offset):
+        result = 0.0
+        abs_offset = ti.abs(offset)
+        if abs_offset < 1.0:
+            result = 2 / 3 - offset**2 + 0.5 * offset**3
+        elif abs_offset < 2.0:
+            result = (2 - abs_offset)**3 / 6
+        return result
 
     @ ti.func
     def linear_interpolation(self, particle_index: ti.i32):
@@ -239,20 +337,51 @@ class ParticleSystem:
 
             self.weights[particle_index, local_idx] = dx * dy * dz
 
-    # Particle to cell
+    @ ti.func
+    def spline_interpolation(self, particle_index: ti.i32):
+        index = self.get_grid_index(self.position[particle_index])
+
+        # get x, y, z offset
+        offset = self.position[particle_index] * self.grid_resolution - index
+
+        weights_sum = 0.0
+
+        # get the weight
+        for local_idx in ti.static(range(8)):
+
+            i = local_idx % 2
+            j = local_idx // 2 % 2
+            k = local_idx // 4
+
+            dx = (1 - i) * self.spline(offset[0]) + \
+                i * self.spline(1 - offset[0])
+            dy = (1 - j) * self.spline(offset[1]) + \
+                j * self.spline(1 - offset[1])
+            dz = (1 - k) * self.spline(offset[2]) + \
+                k * self.spline(1 - offset[2])
+
+            local_weight = dx * dy * dz
+            weights_sum += local_weight
+
+            self.weights[particle_index, local_idx] = local_weight
+
+        for local_idx in ti.static(range(8)):
+            self.weights[particle_index, local_idx] /= weights_sum
 
     @ ti.kernel
-    def P2C(self):
+    def P2C(self) -> ti.i32:
         # clear the grid_weight, delta_grid_vel and grid_vel
         for i, j, k in self.grid_vel:
             self.delta_grid_vel[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
             self.grid_vel[i, j, k] = ti.Vector([0.0, 0.0, 0.0])
             self.grid_weight[i, j, k] = 0.0
+            self.grid_type[i, j, k] = 0  # 0: air, 1: fluid
 
         # accumulate the velocity
         for i in range(self.max_particles):
-            # linear interpolation
-            self.linear_interpolation(i)
+
+            # spline interpolation
+            self.spline_interpolation(i)
 
             # get the grid index
             index = self.get_grid_index(self.position[i])
@@ -268,9 +397,17 @@ class ParticleSystem:
                     self.grid_weight[local_index] += self.weights[i, j]
 
         # normalize the velocity
+        temp_num = 0
         for i, j, k in self.grid_vel:
             if self.grid_weight[i, j, k] > 0.001:
                 self.grid_vel[i, j, k] /= self.grid_weight[i, j, k]
+                self.grid_type[i, j, k] = 1
+                # build the mapping
+                temp_idx = ti.atomic_add(temp_num, 1)
+                self.G2L[self.get_idx(i, j, k)] = temp_idx
+                self.L2G[temp_idx] = ti.Vector([i, j, k])
+
+        return temp_num
 
     # Cell to particle
     # ! reuse the result of P2C
@@ -300,8 +437,8 @@ class ParticleSystem:
     def collision_handling(self, idx: int, plane_point: ti.template(), plane_normal: ti.template()):
         # use impulse
         sdf = self.SDF_plane(self.position[idx], plane_point, plane_normal)
-        if sdf < 0:
-            self.position[idx] -= sdf * plane_normal
+        if sdf < self.thickness:
+            self.position[idx] -= (sdf - self.thickness) * plane_normal
             self.velocity[idx] = self.velocity[idx] - \
                 self.velocity[idx].dot(plane_normal) * \
                 plane_normal * self.beta_collision
@@ -329,16 +466,14 @@ class ParticleSystem:
 
         # grid based operation: update non-advection forces
         # transfer the velocity to the grid
-        self.P2C()
+        self.fluid_num = self.P2C()
+        # print(self.L2G.to_numpy())
+        # print(self.G2L.to_numpy())
         # update gravity
         self.update_gravity(dt)
         # update viscosity
         self.update_viscosity(dt)
         # update pressure
-        self.pressure_b.fill(0)
-        self.build_pressure_b(self.pressure_b, dt)
-        self.pressure_X.from_numpy(self.solver.solve(self.pressure_b).to_numpy().reshape(
-            (self.grid_resolution + 1, self.grid_resolution + 1, self.grid_resolution + 1)))
         self.update_pressure(dt)
         # transfer the velocity back to the particles
         self.C2P()
